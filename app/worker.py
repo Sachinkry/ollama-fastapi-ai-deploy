@@ -4,7 +4,7 @@ import asyncio
 
 @celery_app.task(bind=True, name="generate_text_task")
 def generate_text_task(self, model: str, prompt: str, max_tokens: int = 200, temperature: float = 0.7):
-    """Celery worker task: independent Ollama connection"""
+    """Celery worker task: independent Ollama connection."""
     async def _run():
         ollama = OllamaClient()
         result = await ollama.generate_once(

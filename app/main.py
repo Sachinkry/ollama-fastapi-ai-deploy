@@ -1,7 +1,6 @@
 # app/main.py
 
 from fastapi import FastAPI, Request, Response
-# --- FIX: Import CORSMiddleware ---
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -10,42 +9,38 @@ from app.api import routes_generate, routes_models, routes_status
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.metrics import render_metrics, LATENCY, REQUESTS, ERRORS
-from app.services.ollama_client import ollama
+from app.services.ollama_client import OllamaClient  # ✅ use the class
 
 app = FastAPI(title="Prodify Gateway", version="3.0.0")
 
-# --- FIX: Add CORS Middleware ---
-# This must be placed before you include your routers.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost"], # The origins your frontend is running on
+    allow_origins=["http://localhost:5173", "http://localhost"],
     allow_credentials=True,
-    allow_methods=["*"], # Allows all methods
-    allow_headers=["*"], # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-
-# Concurrency limit (control-plane)
 sem = asyncio.Semaphore(settings.CONCURRENCY_LIMIT)
 
 class MetricsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # health + metrics are public
         if request.url.path in ("/healthz", "/readyz", "/metrics", "/static/index.html"):
             return await call_next(request)
 
-        # latency metrics wrapper
         model = "unknown"
         if request.headers.get("content-type") == "application/json":
             try:
-                body = await request.json()
-                model = body.get("model", "unknown")
-                # Restore the body for the actual endpoint
+                body_bytes = await request.body()
+                body = body_bytes.decode("utf-8")
+                # avoid consuming body: rebuild scope receive
                 async def receive():
-                    return {"type": "http.request", "body": await request.body()}
+                    return {"type": "http.request", "body": body_bytes}
                 request = Request(request.scope, receive)
+                import json
+                model = json.loads(body).get("model", "unknown")
             except:
-                pass # ignore json parsing errors
+                pass
 
         route = request.url.path
         start = time.perf_counter()
@@ -54,20 +49,17 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             async with sem:
                 resp = await call_next(request)
             return resp
-        except Exception:
-            ERRORS.labels(route=route, model=model).inc()
-            raise
         finally:
-            if resp: # only record latency/requests on success
+            if resp is not None:
                 LATENCY.labels(route=route, model=model).observe(time.perf_counter() - start)
                 REQUESTS.labels(route=route, model=model).inc()
-
 
 app.add_middleware(MetricsMiddleware)
 
 # Routers
 app.include_router(routes_models.router, prefix="/models", tags=["Models"])
 app.include_router(routes_generate.router, prefix="/generate", tags=["Generate"])
+app.include_router(routes_status.router, prefix="/status", tags=["Status"])
 
 # Static
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -75,9 +67,10 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 @app.on_event("startup")
 async def on_startup():
     logger.info("🚀 Gateway starting...")
-    await ollama.connect()
+    # ✅ create a client for the API process and keep it in app.state
+    app.state.ollama = OllamaClient()
     try:
-        models = await ollama.list_models()
+        models = await app.state.ollama.list_models()
         logger.info(f"✅ Ollama reachable. Models available: {models}")
     except Exception as e:
         logger.error(f"❌ Ollama not reachable on startup: {e}")
@@ -85,7 +78,8 @@ async def on_startup():
 @app.on_event("shutdown")
 async def on_shutdown():
     logger.info("🌙 Gateway shutting down.")
-    await ollama.close()
+    if hasattr(app.state, "ollama"):
+        await app.state.ollama.close()
 
 @app.get("/healthz")
 async def healthz():
@@ -94,7 +88,7 @@ async def healthz():
 @app.get("/readyz")
 async def readyz():
     try:
-        models = await ollama.list_models()
+        models = await app.state.ollama.list_models()  # ✅ use app.state
         return {"ready": True, "models": len(models)}
     except Exception as e:
         return {"ready": False, "error": str(e)}
@@ -103,5 +97,3 @@ async def readyz():
 async def metrics():
     body, ctype = render_metrics()
     return Response(content=body, media_type=ctype)
-
-app.include_router(routes_status.router, prefix="/status", tags=["Status"])

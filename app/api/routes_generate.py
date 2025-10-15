@@ -1,9 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 from app.core.auth import require_api_key
-from app.services.ollama_client import ollama
-import json
 from app.worker import generate_text_task
 
 router = APIRouter()
@@ -16,7 +13,7 @@ class GenerateRequest(BaseModel):
     top_p: float | None = 0.9
     stream: bool = False
 
-@router.post("/", dependencies=[Depends(require_api_key)])
+@router.post("", dependencies=[Depends(require_api_key)])
 async def enqueue_generate(req: GenerateRequest):
     """Enqueue text generation job"""
     task = generate_text_task.delay(req.model, req.prompt, req.max_tokens, req.temperature)

@@ -10,6 +10,9 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
+    broker_url="redis://localhost:6379/0",
+    result_backend="redis://localhost:6379/0",
+    task_track_started=True,
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],

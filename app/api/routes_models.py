@@ -1,13 +1,13 @@
-from fastapi import APIRouter, HTTPException
-from app.services.ollama_client import ollama
+# app/api/routes_models.py
+from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter()
 
-@router.get("/")
-async def list_models():
+@router.get("")  
+async def list_models(request: Request):
     try:
-        models = await ollama.list_models()
-        print("✅ Returning models:", models)
+        client = request.app.state.ollama  # ✅ use app.state
+        models = await client.list_models()
         return {"models": models}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

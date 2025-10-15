@@ -1,18 +1,25 @@
-from fastapi import APIRouter, HTTPException
-from app.core.celery_app import celery_app
+# app/api/routes_status.py
+from fastapi import APIRouter
+from celery.result import AsyncResult
+from app.worker import celery_app
 
 router = APIRouter()
 
-@router.get("/{task_id}")
-def get_task_status(task_id: str):
-    task_result = celery_app.AsyncResult(task_id)
-    if task_result.state == "PENDING":
-        return {"status": "pending"}
-    elif task_result.state == "STARTED":
-        return {"status": "running"}
-    elif task_result.state == "FAILURE":
-        return {"status": "failed", "error": str(task_result.info)}
-    elif task_result.state == "SUCCESS":
-        return {"status": "completed", "result": task_result.result}
+@router.get("/{job_id}")
+async def get_status(job_id: str):
+    """Return Celery job status and result."""
+    result = AsyncResult(job_id, app=celery_app)
+
+    if result.state == "PENDING":
+        return {"status": "queued"}
+    elif result.state == "STARTED":
+        return {"status": "processing"}
+    elif result.state == "SUCCESS":
+        return {
+            "status": "completed",
+            "result": result.result,  # {'model': '...', 'text': '...'}
+        }
+    elif result.state == "FAILURE":
+        return {"status": "failed", "error": str(result.result)}
     else:
-        raise HTTPException(status_code=400, detail="Unknown state")
+        return {"status": result.state.lower()}
