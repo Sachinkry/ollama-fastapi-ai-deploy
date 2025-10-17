@@ -13,15 +13,13 @@ export default defineConfig([
       js.configs.recommended,
       tseslint.configs.recommended,
       reactHooks.configs['recommended-latest'],
+      reactRefresh.configs.vite,
     ],
-    plugins: {
-      'react-refresh': reactRefresh,
-    },
     rules: {
-      'react-refresh/only-export-components': [
-        'warn',
-        { allowConstantExport: true },
-      ],
+        'react-refresh/only-export-components': [
+            'warn',
+            { allowConstantExport: true },
+        ],
     },
     languageOptions: {
       ecmaVersion: 2020,
