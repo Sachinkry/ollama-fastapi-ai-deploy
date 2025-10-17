@@ -75,15 +75,45 @@ jobs:
           echo "Pinging frontend..."
           curl -f http://localhost:8080
 
-      - name: Run Live API Test
+      - name: Run End-to-End Test
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
         run: |
-          echo "Testing /models endpoint..."
-          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/models)
-          if [ "$response" -ne 200 ]; then
-            echo "/models endpoint failed with status $response"
+          
+          # Step 1: Enqueue the job
+          echo "Submitting generation job..."
+          JOB_ID=$(curl -s -X POST -H "Content-Type: application/json" -H "x-api-key: $API_KEY" -d '{"model":"qwen3:0.6b","prompt":"a haiku about CI/CD"}' http://localhost:8080/generate | jq -r '.job_id')
+
+          if [ -z "$JOB_ID" ] || [ "$JOB_ID" == "null" ]; then
+            echo "Failed to get a valid job_id!"
             exit 1
           fi
-          echo "/models endpoint is responding correctly."
+          echo "Job submitted with ID: $JOB_ID"
+
+          # Step 2: Poll for completion
+          echo "Polling for job completion..."
+          for i in {1..12}; do
+            STATUS_RESPONSE=$(curl -s http://localhost:8080/status/$JOB_ID)
+            JOB_STATUS=$(echo $STATUS_RESPONSE | jq -r '.status')
+            echo "Current job status: $JOB_STATUS"
+
+            if [ "$JOB_STATUS" == "completed" ]; then
+              echo "Job completed successfully!"
+              RESULT_TEXT=$(echo $STATUS_RESPONSE | jq -r '.result.text')
+              echo "Result: $RESULT_TEXT"
+              exit 0
+            fi
+
+            if [ "$JOB_STATUS" == "failed" ]; then
+              echo "Job failed!"
+              echo "Response: $STATUS_RESPONSE"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "Job did not complete in time!"
+          exit 1
 
       - name: View logs on failure
         if: failure()

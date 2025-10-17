@@ -38,7 +38,7 @@ function App() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": "dev-key-123",
+          "x-api-key": import.meta.env.VITE_API_KEY,
         },
         body: JSON.stringify({ model, prompt, max_tokens: maxTokens }),
       })

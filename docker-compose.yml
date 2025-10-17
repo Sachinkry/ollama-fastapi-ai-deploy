@@ -23,7 +23,7 @@ services:
       - "8000:8000"
     environment:
       - OLLAMA_HOST=http://ollama:11434
-      - API_KEYS=dev-key-123,another-key # Replace with your actual keys
+      - API_KEYS=${API_KEYS}
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       - redis
