@@ -53,3 +53,42 @@ jobs:
       - name: Build frontend
         working-directory: ./frontend
         run: npm run build
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build and run Docker Compose
+        run: docker-compose up -d --build
+
+      - name: Health Check
+        # Give services time to start up. In a real-world scenario, 
+        # you might use a more robust tool like docker-compose-wait.
+        run: |
+          sleep 15
+          echo "Pinging backend health check..."
+          curl -f http://localhost:8000/healthz
+          echo "Pinging frontend..."
+          curl -f http://localhost:8080
+
+      - name: Run Live API Test
+        run: |
+          echo "Testing /models endpoint..."
+          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/models)
+          if [ "$response" -ne 200 ]; then
+            echo "/models endpoint failed with status $response"
+            exit 1
+          fi
+          echo "/models endpoint is responding correctly."
+
+      - name: View logs on failure
+        if: failure()
+        run: docker-compose logs
+
+      - name: Tear down services
+        if: always()
+        run: docker-compose down
