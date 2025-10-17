@@ -10,7 +10,7 @@ function App() {
   const [models, setModels] = useState<string[]>([])
   const [model, setModel] = useState("")
   const [prompt, setPrompt] = useState("Once upon a time in Bangalore,")
-  const [maxTokens, setMaxTokens] = useState(80)
+  const [maxTokens, setMaxTokens] = useState(200)
   const [loading, setLoading] = useState(false)
   const [output, setOutput] = useState("")
   const [jobId, setJobId] = useState<string | null>(null)
@@ -122,7 +122,7 @@ function App() {
             value={[maxTokens]}
             onValueChange={(val) => setMaxTokens(val[0])}
             min={10}
-            max={200}
+            max={500}
             step={10}
           />
         </div>

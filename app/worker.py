@@ -7,6 +7,7 @@ def generate_text_task(self, model: str, prompt: str, max_tokens: int = 200, tem
     """Celery worker task: independent Ollama connection."""
     async def _run():
         ollama = OllamaClient()
+        # self.update_state(state="STARTED", meta={"progress": 0})
         result = await ollama.generate_once(
             model=model,
             prompt=prompt,

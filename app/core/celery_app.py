@@ -10,8 +10,6 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
-    broker_url="redis://localhost:6379/0",
-    result_backend="redis://localhost:6379/0",
     task_track_started=True,
     task_serializer="json",
     result_serializer="json",
@@ -19,4 +17,10 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     broker_connection_retry_on_startup=True,
+    task_acks_late=True,
+    broker_transport_options={"visibility_timeout": 3600},
+    task_default_retry_delay=10,
+    task_annotations={
+        '*': {'max_retries': 3, 'time_limit': 60}
+    },
 )

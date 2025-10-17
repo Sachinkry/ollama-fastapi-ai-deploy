@@ -3,12 +3,14 @@ import json
 import asyncio
 import logging
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 class OllamaClient:
-    def __init__(self, base_url: str = "http://127.0.0.1:11434"):
+    def __init__(self, base_url: str | None = None):
         """Initialize a self-contained Ollama HTTP client."""
-        self.base_url = base_url
+        self.base_url = base_url or settings.OLLAMA_HOST
         # immediately create an AsyncClient — no .connect() required
         self.client = httpx.AsyncClient(timeout=120)
 

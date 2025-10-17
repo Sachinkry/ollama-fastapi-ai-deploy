@@ -103,96 +103,6 @@ requirements.txt
 <files>
 This section contains the contents of the repository's files.
 
-<file path="app/api/routes_generate.py">
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from app.core.auth import require_api_key
-from app.worker import generate_text_task
-
-router = APIRouter()
-
-class GenerateRequest(BaseModel):
-    model: str = "qwen3:0.6b"
-    prompt: str
-    max_tokens: int | None = None
-    temperature: float | None = 0.7
-    top_p: float | None = 0.9
-    stream: bool = False
-
-@router.post("", dependencies=[Depends(require_api_key)])
-async def enqueue_generate(req: GenerateRequest):
-    """Enqueue text generation job"""
-    task = generate_text_task.delay(req.model, req.prompt, req.max_tokens, req.temperature)
-    return {"job_id": task.id, "status": "queued"}
-
-# @router.post("/", dependencies=[Depends(require_api_key)])
-# async def generate(req: GenerateRequest):
-#     options = {}
-#     if req.max_tokens is not None: options["num_predict"] = req.max_tokens
-#     if req.temperature is not None: options["temperature"] = req.temperature
-#     if req.top_p is not None: options["top_p"] = req.top_p
-
-#     if not req.stream:
-#         try:
-#             data = await ollama.generate_once(req.model, req.prompt, options)
-#             return JSONResponse(data)
-#         except Exception as e:
-#             raise HTTPException(status_code=500, detail=str(e))
-
-#     async def gen():
-#         try:
-#             async for line in ollama.stream_generate(req.model, req.prompt, options):
-#                 yield line + "\n"
-#         except Exception as e:
-#             yield json.dumps({"error": str(e)}) + "\n"
-
-#     return StreamingResponse(gen(), media_type="application/x-ndjson")
-</file>
-
-<file path="app/api/routes_models.py">
-# app/api/routes_models.py
-from fastapi import APIRouter, HTTPException, Request
-
-router = APIRouter()
-
-@router.get("")  
-async def list_models(request: Request):
-    try:
-        client = request.app.state.ollama  # ✅ use app.state
-        models = await client.list_models()
-        return {"models": models}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-</file>
-
-<file path="app/api/routes_status.py">
-# app/api/routes_status.py
-from fastapi import APIRouter
-from celery.result import AsyncResult
-from app.worker import celery_app
-
-router = APIRouter()
-
-@router.get("/{job_id}")
-async def get_status(job_id: str):
-    """Return Celery job status and result."""
-    result = AsyncResult(job_id, app=celery_app)
-
-    if result.state == "PENDING":
-        return {"status": "queued"}
-    elif result.state == "STARTED":
-        return {"status": "processing"}
-    elif result.state == "SUCCESS":
-        return {
-            "status": "completed",
-            "result": result.result,  # {'model': '...', 'text': '...'}
-        }
-    elif result.state == "FAILURE":
-        return {"status": "failed", "error": str(result.result)}
-    else:
-        return {"status": result.state.lower()}
-</file>
-
 <file path="app/core/auth.py">
 from fastapi import Header, HTTPException, status
 from app.core.config import settings
@@ -203,31 +113,6 @@ def require_api_key(x_api_key: str | None = Header(None)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing or invalid API key"
         )
-</file>
-
-<file path="app/core/celery_app.py">
-from celery import Celery
-import os
-
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-
-celery_app = Celery(
-    "prodify_ai",
-    broker=REDIS_URL,
-    backend=REDIS_URL,
-)
-
-celery_app.conf.update(
-    broker_url="redis://localhost:6379/0",
-    result_backend="redis://localhost:6379/0",
-    task_track_started=True,
-    task_serializer="json",
-    result_serializer="json",
-    accept_content=["json"],
-    timezone="UTC",
-    enable_utc=True,
-    broker_connection_retry_on_startup=True,
-)
 </file>
 
 <file path="app/core/config.py">
@@ -364,65 +249,6 @@ class InferenceResponse(BaseModel):
     score: float
 </file>
 
-<file path="app/services/ollama_client.py">
-import httpx
-import json
-import asyncio
-import logging
-
-logger = logging.getLogger(__name__)
-
-class OllamaClient:
-    def __init__(self, base_url: str = "http://127.0.0.1:11434"):
-        """Initialize a self-contained Ollama HTTP client."""
-        self.base_url = base_url
-        # immediately create an AsyncClient — no .connect() required
-        self.client = httpx.AsyncClient(timeout=120)
-
-    async def list_models(self):
-        """Fetch available Ollama models."""
-        try:
-            r = await self.client.get(f"{self.base_url}/api/tags")
-            r.raise_for_status()
-            data = r.json()
-            return [m["name"] for m in data.get("models", [])]
-        except Exception as e:
-            logger.error(f"Error fetching Ollama models: {e}")
-            return []
-
-    async def generate_once(self, model: str, prompt: str, options: dict = None):
-        """Stream inference output and combine into final text."""
-        options = options or {}
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "options": options,
-            "stream": True
-        }
-
-        full_text = ""
-        try:
-            async with self.client.stream("POST", f"{self.base_url}/api/generate", json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.strip():
-                        continue
-                    try:
-                        data = json.loads(line)
-                        if "response" in data and data["response"]:
-                            full_text += data["response"]
-                    except Exception:
-                        continue
-        except Exception as e:
-            logger.error(f"Error during Ollama generation: {e}")
-            raise
-        return {"model": model, "text": full_text.strip()}
-
-    async def close(self):
-        """Cleanly close the HTTP connection."""
-        await self.client.aclose()
-</file>
-
 <file path="app/static/index.html">
 <!DOCTYPE html>
 <html lang="en">
@@ -486,129 +312,6 @@ class OllamaClient:
   </script>
 </body>
 </html>
-</file>
-
-<file path="app/main.py">
-# app/main.py
-
-from fastapi import FastAPI, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from starlette.middleware.base import BaseHTTPMiddleware
-import asyncio, time
-from app.api import routes_generate, routes_models, routes_status
-from app.core.config import settings
-from app.core.logger import logger
-from app.core.metrics import render_metrics, LATENCY, REQUESTS, ERRORS
-from app.services.ollama_client import OllamaClient  # ✅ use the class
-
-app = FastAPI(title="Prodify Gateway", version="3.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-sem = asyncio.Semaphore(settings.CONCURRENCY_LIMIT)
-
-class MetricsMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if request.url.path in ("/healthz", "/readyz", "/metrics", "/static/index.html"):
-            return await call_next(request)
-
-        model = "unknown"
-        if request.headers.get("content-type") == "application/json":
-            try:
-                body_bytes = await request.body()
-                body = body_bytes.decode("utf-8")
-                # avoid consuming body: rebuild scope receive
-                async def receive():
-                    return {"type": "http.request", "body": body_bytes}
-                request = Request(request.scope, receive)
-                import json
-                model = json.loads(body).get("model", "unknown")
-            except:
-                pass
-
-        route = request.url.path
-        start = time.perf_counter()
-        resp = None
-        try:
-            async with sem:
-                resp = await call_next(request)
-            return resp
-        finally:
-            if resp is not None:
-                LATENCY.labels(route=route, model=model).observe(time.perf_counter() - start)
-                REQUESTS.labels(route=route, model=model).inc()
-
-app.add_middleware(MetricsMiddleware)
-
-# Routers
-app.include_router(routes_models.router, prefix="/models", tags=["Models"])
-app.include_router(routes_generate.router, prefix="/generate", tags=["Generate"])
-app.include_router(routes_status.router, prefix="/status", tags=["Status"])
-
-# Static
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
-
-@app.on_event("startup")
-async def on_startup():
-    logger.info("🚀 Gateway starting...")
-    # ✅ create a client for the API process and keep it in app.state
-    app.state.ollama = OllamaClient()
-    try:
-        models = await app.state.ollama.list_models()
-        logger.info(f"✅ Ollama reachable. Models available: {models}")
-    except Exception as e:
-        logger.error(f"❌ Ollama not reachable on startup: {e}")
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    logger.info("🌙 Gateway shutting down.")
-    if hasattr(app.state, "ollama"):
-        await app.state.ollama.close()
-
-@app.get("/healthz")
-async def healthz():
-    return {"ok": True}
-
-@app.get("/readyz")
-async def readyz():
-    try:
-        models = await app.state.ollama.list_models()  # ✅ use app.state
-        return {"ready": True, "models": len(models)}
-    except Exception as e:
-        return {"ready": False, "error": str(e)}
-
-@app.get("/metrics")
-async def metrics():
-    body, ctype = render_metrics()
-    return Response(content=body, media_type=ctype)
-</file>
-
-<file path="app/worker.py">
-from app.core.celery_app import celery_app
-from app.services.ollama_client import OllamaClient
-import asyncio
-
-@celery_app.task(bind=True, name="generate_text_task")
-def generate_text_task(self, model: str, prompt: str, max_tokens: int = 200, temperature: float = 0.7):
-    """Celery worker task: independent Ollama connection."""
-    async def _run():
-        ollama = OllamaClient()
-        result = await ollama.generate_once(
-            model=model,
-            prompt=prompt,
-            options={"num_predict": max_tokens, "temperature": temperature},
-        )
-        await ollama.close()
-        return result
-
-    return asyncio.run(_run())
 </file>
 
 <file path="frontend/public/vite.svg">
@@ -1131,167 +834,6 @@ export function cn(...inputs: ClassValue[]) {
 }
 </file>
 
-<file path="frontend/src/App.tsx">
-import { useEffect, useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Slider } from "@/components/ui/slider"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Label } from "@/components/ui/label"
-
-function App() {
-  const [models, setModels] = useState<string[]>([])
-  const [model, setModel] = useState("")
-  const [prompt, setPrompt] = useState("Once upon a time in Bangalore,")
-  const [maxTokens, setMaxTokens] = useState(80)
-  const [loading, setLoading] = useState(false)
-  const [output, setOutput] = useState("")
-  const [jobId, setJobId] = useState<string | null>(null)
-  const [status, setStatus] = useState("idle")
-
-  useEffect(() => {
-    fetch("/models")
-      .then((res) => res.json())
-      .then((data) => {
-        setModels(data.models || [])
-        if (data.models?.length > 0) setModel(data.models[0])
-      })
-      .catch((err) => console.error("Failed to load models:", err))
-  }, [])
-
-  async function handleGenerate() {
-    if (!model || !prompt.trim()) return
-    setLoading(true)
-    setOutput("")
-    setJobId(null)
-    setStatus("queued")
-
-    try {
-      const res = await fetch("/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": "dev-key-123",
-        },
-        body: JSON.stringify({ model, prompt, max_tokens: maxTokens }),
-      })
-
-      const data = await res.json()
-      if (data.job_id) {
-        setJobId(data.job_id)
-        pollStatus(data.job_id)
-      } else {
-        setOutput("Unexpected response: " + JSON.stringify(data))
-        setLoading(false)
-      }
-    } catch (err) {
-      console.error(err)
-      setOutput("Error generating text.")
-      setLoading(false)
-    }
-  }
-
-  async function pollStatus(jobId: string) {
-    const interval = setInterval(async () => {
-      const res = await fetch(`/status/${jobId}`)
-      const data = await res.json()
-
-      if (data.status === "completed") {
-        clearInterval(interval)
-        setOutput(data.result.text || "No text returned.")
-        setStatus("completed")
-        setLoading(false)
-      } else if (data.status === "failed") {
-        clearInterval(interval)
-        setOutput(`❌ Failed: ${data.error}`)
-        setStatus("failed")
-        setLoading(false)
-      } else {
-        setStatus(data.status)
-      }
-    }, 2000)
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10 px-4">
-      <div className="w-full max-w-2xl space-y-6">
-        <h1 className="text-3xl font-bold text-center">🚀 Prodify Text Inference Queue</h1>
-        <p className="text-center text-gray-600">
-          Generate text asynchronously via FastAPI + Celery + Ollama.
-        </p>
-
-        {/* Model Selector */}
-        <div className="space-y-2">
-          <Label>Select Model</Label>
-          <Select value={model} onValueChange={setModel}>
-            <SelectTrigger>
-              <SelectValue placeholder="Choose a model..." />
-            </SelectTrigger>
-            <SelectContent>
-              {models.map((m) => (
-                <SelectItem key={m} value={m}>
-                  {m}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Prompt Input */}
-        <div className="space-y-2">
-          <Label>Prompt</Label>
-          <Textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Enter your text prompt..."
-            rows={5}
-          />
-        </div>
-
-        {/* Token Slider */}
-        <div className="space-y-2">
-          <Label>Max Tokens: {maxTokens}</Label>
-          <Slider
-            value={[maxTokens]}
-            onValueChange={(val) => setMaxTokens(val[0])}
-            min={10}
-            max={200}
-            step={10}
-          />
-        </div>
-
-        {/* Generate Button */}
-        <div className="flex justify-center">
-          <Button onClick={handleGenerate} disabled={loading || !model}>
-            {loading ? `Generating (${status})...` : "Generate"}
-          </Button>
-        </div>
-
-        {/* Output Card */}
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Output</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {jobId && (
-              <div className="text-xs text-gray-500 mb-2">
-                Job ID: <code>{jobId}</code> ({status})
-              </div>
-            )}
-            <pre className="whitespace-pre-wrap text-sm">
-              {output || "No output yet."}
-            </pre>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  )
-}
-
-export default App
-</file>
-
 <file path="frontend/src/index.css">
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -1728,37 +1270,6 @@ export default defineConfig([
 }
 </file>
 
-<file path="frontend/vite.config.ts">
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import path from "path"
-import tailwindcss from "@tailwindcss/vite"
-
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  },
-  server: {
-    proxy: {
-      "/generate": "http://127.0.0.1:8000",
-      "/models": "http://127.0.0.1:8000",
-    },
-  },
-  
-})
-</file>
-
-<file path=".gitignore">
-.venv
-__pycache__
-.env
-dump.rdb
-</file>
-
 <file path="requirements.txt">
 amqp==5.3.1
 annotated-types==0.7.0
@@ -1814,6 +1325,496 @@ urllib3==2.5.0
 uvicorn==0.37.0
 vine==5.1.0
 wcwidth==0.2.14
+</file>
+
+<file path="app/api/routes_generate.py">
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from app.core.auth import require_api_key
+from app.worker import generate_text_task
+
+router = APIRouter()
+
+class GenerateRequest(BaseModel):
+    model: str = "qwen3:0.6b"
+    prompt: str
+    max_tokens: int | None = None
+    temperature: float | None = 0.7
+    top_p: float | None = 0.9
+    stream: bool = False
+
+@router.post("", dependencies=[Depends(require_api_key)])
+async def enqueue_generate(req: GenerateRequest):
+    """Enqueue text generation job"""
+    task = generate_text_task.delay(req.model, req.prompt, req.max_tokens, req.temperature)
+    return {"job_id": task.id, "status": "queued"}
+
+# @router.post("/", dependencies=[Depends(require_api_key)])
+# async def generate(req: GenerateRequest):
+#     options = {}
+#     if req.max_tokens is not None: options["num_predict"] = req.max_tokens
+#     if req.temperature is not None: options["temperature"] = req.temperature
+#     if req.top_p is not None: options["top_p"] = req.top_p
+
+#     if not req.stream:
+#         try:
+#             data = await ollama.generate_once(req.model, req.prompt, options)
+#             return JSONResponse(data)
+#         except Exception as e:
+#             raise HTTPException(status_code=500, detail=str(e))
+
+#     async def gen():
+#         try:
+#             async for line in ollama.stream_generate(req.model, req.prompt, options):
+#                 yield line + "\n"
+#         except Exception as e:
+#             yield json.dumps({"error": str(e)}) + "\n"
+
+#     return StreamingResponse(gen(), media_type="application/x-ndjson")
+</file>
+
+<file path="app/api/routes_models.py">
+# app/api/routes_models.py
+from fastapi import APIRouter, HTTPException, Request
+
+router = APIRouter()
+
+@router.get("")  
+async def list_models(request: Request):
+    try:
+        client = request.app.state.ollama  # ✅ use app.state
+        models = await client.list_models()
+        return {"models": models}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+</file>
+
+<file path="app/api/routes_status.py">
+# app/api/routes_status.py
+from fastapi import APIRouter
+from celery.result import AsyncResult
+from app.worker import celery_app
+
+router = APIRouter()
+
+@router.get("/{job_id}")
+async def get_status(job_id: str):
+    """Return Celery job status and result."""
+    result = AsyncResult(job_id, app=celery_app)
+
+    if result.state == "PENDING":
+        return {"status": "queued"}
+    elif result.state == "STARTED":
+        return {"status": "processing"}
+    elif result.state == "SUCCESS":
+        return {
+            "status": "completed",
+            "result": result.result,  # {'model': '...', 'text': '...'}
+        }
+    elif result.state == "FAILURE":
+        return {"status": "failed", "error": str(result.result)}
+    else:
+        return {"status": result.state.lower()}
+</file>
+
+<file path="app/core/celery_app.py">
+from celery import Celery
+import os
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+celery_app = Celery(
+    "prodify_ai",
+    broker=REDIS_URL,
+    backend=REDIS_URL,
+)
+
+celery_app.conf.update(
+    broker_url="redis://localhost:6379/0",
+    result_backend="redis://localhost:6379/0",
+    task_track_started=True,
+    task_serializer="json",
+    result_serializer="json",
+    accept_content=["json"],
+    timezone="UTC",
+    enable_utc=True,
+    broker_connection_retry_on_startup=True,
+)
+</file>
+
+<file path="app/services/ollama_client.py">
+import httpx
+import json
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+class OllamaClient:
+    def __init__(self, base_url: str = "http://127.0.0.1:11434"):
+        """Initialize a self-contained Ollama HTTP client."""
+        self.base_url = base_url
+        # immediately create an AsyncClient — no .connect() required
+        self.client = httpx.AsyncClient(timeout=120)
+
+    async def list_models(self):
+        """Fetch available Ollama models."""
+        try:
+            r = await self.client.get(f"{self.base_url}/api/tags")
+            r.raise_for_status()
+            data = r.json()
+            return [m["name"] for m in data.get("models", [])]
+        except Exception as e:
+            logger.error(f"Error fetching Ollama models: {e}")
+            return []
+
+    async def generate_once(self, model: str, prompt: str, options: dict = None):
+        """Stream inference output and combine into final text."""
+        options = options or {}
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "options": options,
+            "stream": True
+        }
+
+        full_text = ""
+        try:
+            async with self.client.stream("POST", f"{self.base_url}/api/generate", json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                        if "response" in data and data["response"]:
+                            full_text += data["response"]
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.error(f"Error during Ollama generation: {e}")
+            raise
+        return {"model": model, "text": full_text.strip()}
+
+    async def close(self):
+        """Cleanly close the HTTP connection."""
+        await self.client.aclose()
+</file>
+
+<file path="app/main.py">
+# app/main.py
+
+from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
+import asyncio, time
+from app.api import routes_generate, routes_models, routes_status
+from app.core.config import settings
+from app.core.logger import logger
+from app.core.metrics import render_metrics, LATENCY, REQUESTS, ERRORS
+from app.services.ollama_client import OllamaClient  # ✅ use the class
+
+app = FastAPI(title="Prodify Gateway", version="3.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+sem = asyncio.Semaphore(settings.CONCURRENCY_LIMIT)
+
+class MetricsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path in ("/healthz", "/readyz", "/metrics", "/static/index.html"):
+            return await call_next(request)
+
+        model = "unknown"
+        if request.headers.get("content-type") == "application/json":
+            try:
+                body_bytes = await request.body()
+                body = body_bytes.decode("utf-8")
+                # avoid consuming body: rebuild scope receive
+                async def receive():
+                    return {"type": "http.request", "body": body_bytes}
+                request = Request(request.scope, receive)
+                import json
+                model = json.loads(body).get("model", "unknown")
+            except:
+                pass
+
+        route = request.url.path
+        start = time.perf_counter()
+        resp = None
+        try:
+            async with sem:
+                resp = await call_next(request)
+            return resp
+        finally:
+            if resp is not None:
+                LATENCY.labels(route=route, model=model).observe(time.perf_counter() - start)
+                REQUESTS.labels(route=route, model=model).inc()
+
+app.add_middleware(MetricsMiddleware)
+
+# Routers
+app.include_router(routes_models.router, prefix="/models", tags=["Models"])
+app.include_router(routes_generate.router, prefix="/generate", tags=["Generate"])
+app.include_router(routes_status.router, prefix="/status", tags=["Status"])
+
+# Static
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+@app.on_event("startup")
+async def on_startup():
+    logger.info("🚀 Gateway starting...")
+    # ✅ create a client for the API process and keep it in app.state
+    app.state.ollama = OllamaClient()
+    try:
+        models = await app.state.ollama.list_models()
+        logger.info(f"✅ Ollama reachable. Models available: {models}")
+    except Exception as e:
+        logger.error(f"❌ Ollama not reachable on startup: {e}")
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    logger.info("🌙 Gateway shutting down.")
+    if hasattr(app.state, "ollama"):
+        await app.state.ollama.close()
+
+@app.get("/healthz")
+async def healthz():
+    return {"ok": True}
+
+@app.get("/readyz")
+async def readyz():
+    try:
+        models = await app.state.ollama.list_models()  # ✅ use app.state
+        return {"ready": True, "models": len(models)}
+    except Exception as e:
+        return {"ready": False, "error": str(e)}
+
+@app.get("/metrics")
+async def metrics():
+    body, ctype = render_metrics()
+    return Response(content=body, media_type=ctype)
+</file>
+
+<file path="app/worker.py">
+from app.core.celery_app import celery_app
+from app.services.ollama_client import OllamaClient
+import asyncio
+
+@celery_app.task(bind=True, name="generate_text_task")
+def generate_text_task(self, model: str, prompt: str, max_tokens: int = 200, temperature: float = 0.7):
+    """Celery worker task: independent Ollama connection."""
+    async def _run():
+        ollama = OllamaClient()
+        result = await ollama.generate_once(
+            model=model,
+            prompt=prompt,
+            options={"num_predict": max_tokens, "temperature": temperature},
+        )
+        await ollama.close()
+        return result
+
+    return asyncio.run(_run())
+</file>
+
+<file path="frontend/src/App.tsx">
+import { useEffect, useState } from "react"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Slider } from "@/components/ui/slider"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+
+function App() {
+  const [models, setModels] = useState<string[]>([])
+  const [model, setModel] = useState("")
+  const [prompt, setPrompt] = useState("Once upon a time in Bangalore,")
+  const [maxTokens, setMaxTokens] = useState(200)
+  const [loading, setLoading] = useState(false)
+  const [output, setOutput] = useState("")
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [status, setStatus] = useState("idle")
+
+  useEffect(() => {
+    fetch("/models")
+      .then((res) => res.json())
+      .then((data) => {
+        setModels(data.models || [])
+        if (data.models?.length > 0) setModel(data.models[0])
+      })
+      .catch((err) => console.error("Failed to load models:", err))
+  }, [])
+
+  async function handleGenerate() {
+    if (!model || !prompt.trim()) return
+    setLoading(true)
+    setOutput("")
+    setJobId(null)
+    setStatus("queued")
+
+    try {
+      const res = await fetch("/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": "dev-key-123",
+        },
+        body: JSON.stringify({ model, prompt, max_tokens: maxTokens }),
+      })
+
+      const data = await res.json()
+      if (data.job_id) {
+        setJobId(data.job_id)
+        pollStatus(data.job_id)
+      } else {
+        setOutput("Unexpected response: " + JSON.stringify(data))
+        setLoading(false)
+      }
+    } catch (err) {
+      console.error(err)
+      setOutput("Error generating text.")
+      setLoading(false)
+    }
+  }
+
+  async function pollStatus(jobId: string) {
+    const interval = setInterval(async () => {
+      const res = await fetch(`/status/${jobId}`)
+      const data = await res.json()
+
+      if (data.status === "completed") {
+        clearInterval(interval)
+        setOutput(data.result.text || "No text returned.")
+        setStatus("completed")
+        setLoading(false)
+      } else if (data.status === "failed") {
+        clearInterval(interval)
+        setOutput(`❌ Failed: ${data.error}`)
+        setStatus("failed")
+        setLoading(false)
+      } else {
+        setStatus(data.status)
+      }
+    }, 2000)
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center py-10 px-4">
+      <div className="w-full max-w-2xl space-y-6">
+        <h1 className="text-3xl font-bold text-center">🚀 Prodify Text Inference Queue</h1>
+        <p className="text-center text-gray-600">
+          Generate text asynchronously via FastAPI + Celery + Ollama.
+        </p>
+
+        {/* Model Selector */}
+        <div className="space-y-2">
+          <Label>Select Model</Label>
+          <Select value={model} onValueChange={setModel}>
+            <SelectTrigger>
+              <SelectValue placeholder="Choose a model..." />
+            </SelectTrigger>
+            <SelectContent>
+              {models.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Prompt Input */}
+        <div className="space-y-2">
+          <Label>Prompt</Label>
+          <Textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Enter your text prompt..."
+            rows={5}
+          />
+        </div>
+
+        {/* Token Slider */}
+        <div className="space-y-2">
+          <Label>Max Tokens: {maxTokens}</Label>
+          <Slider
+            value={[maxTokens]}
+            onValueChange={(val) => setMaxTokens(val[0])}
+            min={10}
+            max={500}
+            step={10}
+          />
+        </div>
+
+        {/* Generate Button */}
+        <div className="flex justify-center">
+          <Button onClick={handleGenerate} disabled={loading || !model}>
+            {loading ? `Generating (${status})...` : "Generate"}
+          </Button>
+        </div>
+
+        {/* Output Card */}
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle>Output</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {jobId && (
+              <div className="text-xs text-gray-500 mb-2">
+                Job ID: <code>{jobId}</code> ({status})
+              </div>
+            )}
+            <pre className="whitespace-pre-wrap text-sm">
+              {output || "No output yet."}
+            </pre>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+export default App
+</file>
+
+<file path="frontend/vite.config.ts">
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import path from "path"
+import tailwindcss from "@tailwindcss/vite"
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  server: {
+    proxy: {
+      "/generate": "http://127.0.0.1:8000",
+      "/models": "http://127.0.0.1:8000",
+      "/status": "http://127.0.0.1:8000",
+    },
+  },
+  
+})
+</file>
+
+<file path=".gitignore">
+.venv
+__pycache__
+.env
+dump.rdb
 </file>
 
 </files>
