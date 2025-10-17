@@ -79,13 +79,26 @@ jobs:
         env:
           API_KEY: ${{ secrets.API_KEY }}
         run: |
+          echo "Starting end-to-end test for /generate endpoint..."
           
-          # Step 1: Enqueue the job
+          # Step 1: Enqueue the job and capture response
           echo "Submitting generation job..."
-          JOB_ID=$(curl -s -X POST -H "Content-Type: application/json" -H "x-api-key: $API_KEY" -d '{"model":"qwen3:0.6b","prompt":"a haiku about CI/CD"}' http://localhost:8080/generate | jq -r '.job_id')
+          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -H "x-api-key: $API_KEY" -d '{"model":"qwen3:0.6b","prompt":"a haiku about CI/CD"}' http://localhost:8080/generate)
+          HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n1)
+          HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+
+          echo "Response Body: $HTTP_BODY"
+          echo "Response Status: $HTTP_STATUS"
+
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "/generate endpoint failed with status $HTTP_STATUS"
+            exit 1
+          fi
+
+          JOB_ID=$(echo $HTTP_BODY | jq -r '.job_id')
 
           if [ -z "$JOB_ID" ] || [ "$JOB_ID" == "null" ]; then
-            echo "Failed to get a valid job_id!"
+            echo "Failed to get a valid job_id from response!"
             exit 1
           fi
           echo "Job submitted with ID: $JOB_ID"
