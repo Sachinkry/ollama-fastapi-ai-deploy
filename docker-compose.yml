@@ -12,6 +12,11 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
     environment:
       - OLLAMA_LOAD_TIMEOUT=600
 
@@ -28,8 +33,9 @@ services:
       - API_KEYS=${API_KEYS}
       - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - redis
-      - ollama
+      redis:
+      ollama:
+        condition: service_healthy
 
   # Celery worker for background tasks
   worker:
@@ -37,12 +43,10 @@ services:
       context: .
       dockerfile: Dockerfile
     command: celery -A app.worker.celery_app worker --loglevel=info
-    environment:
-      - OLLAMA_HOST=http://ollama:11434
-      - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - redis
-      - ollama
+      redis:
+      ollama:
+        condition: service_healthy
 
   # Frontend Nginx server
   frontend:
