@@ -75,7 +75,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
 
-      # This command will now use the cache configured in docker-compose.yml
+      - name: Build and run Docker Compose
         env:
           API_KEYS: dev-key-123
         run: docker compose up -d --build
