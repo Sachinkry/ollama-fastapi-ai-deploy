@@ -12,6 +12,8 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_LOAD_TIMEOUT=600
 
   # Backend FastAPI server
   backend:
