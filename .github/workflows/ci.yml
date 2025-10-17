@@ -19,8 +19,8 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -38,8 +38,8 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
@@ -62,28 +62,87 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # ⬇️ STEP 1: ADDED - Log in to GHCR to store/retrieve cache layers
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ⬇️ STEP 2: ADDED - Set up the advanced builder required for caching
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # This command will now use the cache configured in docker-compose.yml
       - name: Build and run Docker Compose
+        env:
+          API_KEYS: ${{ secrets.API_KEY }}
         run: docker compose up -d --build
 
-      - name: Health Check
-        # Give services time to start up. In a real-world scenario, 
-        # you might use a more robust tool like docker-compose-wait.
-        run: |
-          sleep 15
-          echo "Pinging backend health check..."
-          curl -f http://localhost:8000/healthz
-          echo "Pinging frontend..."
-          curl -f http://localhost:8080
+      - name: Install jq
+        run: sudo apt-get install -y jq
 
-      - name: Run Live API Test
+      - name: Wait for services to be healthy
         run: |
-          echo "Testing /models endpoint..."
-          response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/models)
-          if [ "$response" -ne 200 ]; then
-            echo "/models endpoint failed with status $response"
+          echo "Waiting for backend..."
+          while [[ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/healthz)" != "200" ]]; do
+            sleep 2
+          done
+          echo "Waiting for frontend..."
+          while [[ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/)" != "200" ]]; do
+            sleep 2
+          done
+          echo "Services are up!"
+
+      - name: Run End-to-End Test
+        env:
+          API_KEYS: ${{ secrets.API_KEY }}
+        run: |
+          # (Your test script remains the same)
+          echo "Starting end-to-end test for /generate endpoint..."
+
+          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -H "x-api-key: $API_KEYS" -d '{"model":"qwen3:0.6b","prompt":"a haiku about CI/CD"}' http://localhost:8080/generate)
+          HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n1)
+          HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+
+          echo "Response Body: $HTTP_BODY"
+          echo "Response Status: $HTTP_STATUS"
+
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "/generate endpoint failed with status $HTTP_STATUS"
             exit 1
           fi
-          echo "/models endpoint is responding correctly."
+
+          JOB_ID=$(echo $HTTP_BODY | jq -r '.job_id')
+
+          if [ -z "$JOB_ID" ] || [ "$JOB_ID" == "null" ]; then
+            echo "Failed to get a valid job_id from response!"
+            exit 1
+          fi
+          echo "Job submitted with ID: $JOB_ID"
+
+          echo "Polling for job completion..."
+          for i in {1..60}; do
+            STATUS_RESPONSE=$(curl -s http://localhost:8080/status/$JOB_ID)
+            JOB_STATUS=$(echo $STATUS_RESPONSE | jq -r '.status')
+            echo "Current job status: $JOB_STATUS"
+
+            if [ "$JOB_STATUS" == "completed" ]; then
+              echo "Job completed successfully!"
+              RESULT_TEXT=$(echo $STATUS_RESPONSE | jq -r '.result.text')
+              echo "Result: $RESULT_TEXT"
+              exit 0
+            elif [ "$JOB_STATUS" == "failed" ]; then
+              echo "Job failed!"
+              echo "Response: $STATUS_RESPONSE"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "Job did not complete in time!"
+          exit 1
 
       - name: View logs on failure
         if: failure()

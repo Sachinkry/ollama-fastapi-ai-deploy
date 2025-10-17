@@ -12,35 +12,51 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    environment:
+      - OLLAMA_LOAD_TIMEOUT=600
 
   # Backend FastAPI server
   backend:
     build:
       context: .
       dockerfile: Dockerfile
+    cache:
+        - type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/prodify-cache-backend:latest
+        - type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/prodify-cache-backend:main,mode=max
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
     environment:
       - OLLAMA_HOST=http://ollama:11434
-      - API_KEYS=dev-key-123,another-key # Replace with your actual keys
+      - API_KEYS=${API_KEYS}
       - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - redis
-      - ollama
+      redis:
+        condition: service_started
+      ollama:
+        condition: service_healthy
 
   # Celery worker for background tasks
   worker:
     build:
       context: .
       dockerfile: Dockerfile
+    cache:
+        - type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/prodify-cache-frontend:latest
+        - type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/prodify-cache-frontend:main,mode=max
     command: celery -A app.worker.celery_app worker --loglevel=info
     environment:
-      - OLLAMA_HOST=http://ollama:11434
       - REDIS_URL=redis://redis:6379/0
     depends_on:
-      - redis
-      - ollama
+      redis:
+        condition: service_started
+      ollama:
+        condition: service_healthy
 
   # Frontend Nginx server
   frontend:
@@ -50,7 +66,8 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_started
 
 volumes:
   ollama_data:
