@@ -1,0 +1,12 @@
+services:
+  ollama:
+    build:
+      context: .
+      dockerfile: tests/Dockerfile.mock_ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 1s
+      timeout: 1s
+      retries: 5
