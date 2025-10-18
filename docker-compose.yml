@@ -25,9 +25,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      cache:
-        - type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/prodify-cache-backend:latest
-        - type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/prodify-cache-backend:main,mode=max
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
@@ -46,11 +43,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      cache:
-        - type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/prodify-cache-frontend:latest
-        - type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/prodify-cache-frontend:main,mode=max
     command: celery -A app.worker.celery_app worker --loglevel=info
     environment:
+      - OLLAMA_HOST=http://ollama:11434
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       redis:
