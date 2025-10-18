@@ -74,10 +74,10 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # This command will now use the cache configured in docker-compose.yml
+
       - name: Build and run Docker Compose
         env:
-          API_KEYS: ${{ secrets.API_KEY }}
+          API_KEYS: dev-key-123
         run: docker compose up -d --build
 
       - name: Install jq
@@ -97,7 +97,7 @@ jobs:
 
       - name: Run End-to-End Test
         env:
-          API_KEYS: ${{ secrets.API_KEY }}
+          API_KEYS: dev-key-123
         run: |
           # (Your test script remains the same)
           echo "Starting end-to-end test for /generate endpoint..."
@@ -150,4 +150,6 @@ jobs:
 
       - name: Tear down services
         if: always()
+        env:
+          API_KEYS: dev-key-123
         run: docker compose down
