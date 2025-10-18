@@ -19,22 +19,22 @@ This project demonstrates a modern, scalable, and fault-tolerant architecture fo
 The system is composed of several interconnected services, each playing a crucial role in the inference pipeline:
 
 ```
-+-------------------+       +-------------------+       +-------------------+
-| Frontend (React)  | <---> | FastAPI Gateway   | <---> | Redis (Broker)    |
-| (User Interface)  |       | (API, Auth, Queue)|       | (Task Queue)      |
-+-------------------+       +-------------------+       +-------------------+
-         ▲                           │                           │
-         │                           │                           ▼
-         │                     (Enqueues Task)             +-------------------+
-         │                                                 | Celery Worker     |
-         │                                                 | (Task Execution)  |
-         │                                                 +-------------------+
-         │                                                           │
-         │                                                           ▼
-         │                                                     +-------------------+
-         +-----------------------------------------------------| Ollama (LLM)      |
-           (Polls for Results)                                 | (Model Inference) |
-                                                               +-------------------+
++-------------------+       +-------------------+       +-------------------+ 
+| Frontend (React)  | <---> | FastAPI Gateway   | <---> | Redis (Broker)    | 
+| (User Interface)  |       | (API, Auth, Queue)|       | (Task Queue)      | 
++-------------------+       +-------------------+       +-------------------+ 
+         ▲                           │                           │ 
+         │                           │                           ▼ 
+         │                     (Enqueues Task)             +-------------------+ 
+         │                                                 | Celery Worker     | 
+         │                                                 | (Task Execution)  | 
+         │                                                 +-------------------+ 
+         │                                                           │ 
+         │                                                           ▼ 
+         │                                                     +-------------------+ 
+         +-----------------------------------------------------| Ollama (LLM)      | 
+           (Polls for Results)                                 | (Model Inference) | 
+                                                               +-------------------+ 
 ```
 
 ### Component Breakdown:
@@ -51,14 +51,14 @@ The system is composed of several interconnected services, each playing a crucia
 
 ## Tech Stack
 
-| Layer                | Technology                         | Role                                                             |
-| :------------------- | :--------------------------------- | :--------------------------------------------------------------- |
-| **Frontend**         | React, Vite, Shadcn UI, TypeScript | Interactive UI for prompt submission and result display          |
-| **Backend API**      | FastAPI, Python                    | High-performance API gateway, authentication, task enqueuing     |
-| **Task Queue**       | Celery, Redis                      | Asynchronous task management, message brokering, result storage  |
-| **LLM Inference**    | Ollama                             | Local LLM serving (supports various models like Qwen, Mistral)   |
-| **Containerization** | Docker, Docker Compose             | Environment consistency, simplified deployment and orchestration |
-| **Monitoring**       | Prometheus Client (Python)         | Capturing and exposing application metrics                       |
+| Layer                | Technology                         | Role                                                             | 
+| :------------------- | :--------------------------------- | :--------------------------------------------------------------- | 
+| **Frontend**         | React, Vite, Shadcn UI, TypeScript | Interactive UI for prompt submission and result display          | 
+| **Backend API**      | FastAPI, Python                    | High-performance API gateway, authentication, task enqueuing     | 
+| **Task Queue**       | Celery, Redis                      | Asynchronous task management, message brokering, result storage  | 
+| **LLM Inference**    | Ollama                             | Local LLM serving (supports various models like Qwen, Mistral)   | 
+| **Containerization** | Docker, Docker Compose             | Environment consistency, simplified deployment and orchestration | 
+| **Monitoring**       | Prometheus Client (Python)         | Capturing and exposing application metrics                       | 
 
 ## Project Structure
 
@@ -158,7 +158,7 @@ curl -X POST http://localhost:8000/generate \
 This will return a `job_id`:
 
 ```json
-{ "job_id": "some-unique-job-id", "status": "queued" }
+{ "job_id": "some-unique-job-id", "status": "queued" } 
 ```
 
 You can then poll the status endpoint:
@@ -170,14 +170,40 @@ curl http://localhost:8000/status/some-unique-job-id
 Once completed, the response will include the generated text:
 
 ```json
-{ "status": "completed", "result": { "text": "Machines learn and grow,
-Future minds begin to bloom,
-World transformed anew." } }
+{ "status": "completed", "result": { "text": "Machines learn and grow,\nFuture minds begin to bloom,\nWorld transformed anew." } }
 ```
 
 ## Monitoring
 
 Access Prometheus metrics at `http://localhost:8000/metrics`. These metrics provide insights into request latency, request counts, and error rates, allowing for effective monitoring and performance analysis.
+
+## Viewing Logs
+
+To see the real-time logs for the different services, you can use the `docker logs -f` command. This is useful for debugging and monitoring your application.
+
+### Backend Logs
+
+To view the logs for the FastAPI backend service, run the following command:
+
+```bash
+docker logs -f deploy-ai-fastapi-backend-1
+```
+
+### Frontend Logs
+
+To view the logs for the Nginx frontend service, run the following command:
+
+```bash
+docker logs -f deploy-ai-fastapi-frontend-1
+```
+
+### Worker Logs
+
+To view the logs for the Celery worker, which is responsible for running the inference tasks, run the following command:
+
+```bash
+docker logs -f deploy-ai-fastapi-worker-1
+```
 
 ## Contributing
 
