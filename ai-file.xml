@@ -100,7 +100,14 @@ frontend/
   tsconfig.json
   tsconfig.node.json
   vite.config.ts
+tests/
+  test_api_generate.py
+  test_api_models.py
+  test_main.py
+.env.example
 .gitignore
+docker-compose.yml
+Dockerfile
 README.md
 requirements.txt
 </directory_structure>
@@ -1049,37 +1056,6 @@ CMD ["nginx", "-g", "daemon off;"]
 </html>
 </file>
 
-<file path="frontend/nginx.conf">
-server {
-  listen 80;
-
-  # Root directory for static files
-  root /usr/share/nginx/html;
-  index index.html;
-
-  # Handle client-side routing for React
-  location / {
-    try_files $uri $uri/ /index.html;
-  }
-
-  # Proxy API requests to the backend service
-  location ~ ^/(models|generate|status) {
-    proxy_pass http://backend:8000;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-  }
-
-  # Optional: Add headers to prevent caching in development
-  location ~* \.(?:html|js|css)$ {
-    add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
-    expires off;
-    etag off;
-  }
-}
-</file>
-
 <file path="frontend/package.json">
 {
   "name": "frontend",
@@ -1286,61 +1262,174 @@ export default defineConfig([
 }
 </file>
 
-<file path="requirements.txt">
-amqp==5.3.1
-annotated-types==0.7.0
-anyio==4.11.0
-billiard==4.2.2
-celery==5.5.3
-certifi==2025.10.5
-charset-normalizer==3.4.4
-click==8.3.0
-click-didyoumean==0.3.1
-click-plugins==1.1.1.2
-click-repl==0.3.0
-fastapi==0.119.0
-filelock==3.20.0
-fsspec==2025.9.0
-h11==0.16.0
-hf-xet==1.1.10
-httpcore==1.0.9
-httpx==0.28.1
-huggingface-hub==0.35.3
-idna==3.11
-jinja2==3.1.6
-kombu==5.5.4
-markupsafe==3.0.3
-mpmath==1.3.0
-networkx==3.5
-numpy==2.3.3
-packaging==25.0
-prometheus-client==0.23.1
-prompt-toolkit==3.0.52
-pydantic==2.12.2
-pydantic-core==2.41.4
-python-dateutil==2.9.0.post0
-python-dotenv==1.1.1
-pyyaml==6.0.3
-redis==5.2.1
-regex==2025.9.18
-requests==2.32.5
-safetensors==0.6.2
-setuptools==80.9.0
-six==1.17.0
-sniffio==1.3.1
-starlette==0.48.0
-sympy==1.14.0
-tokenizers==0.22.1
-torch==2.8.0
-tqdm==4.67.1
-transformers==4.57.1
-typing-extensions==4.15.0
-typing-inspection==0.4.2
-tzdata==2025.2
-urllib3==2.5.0
-uvicorn==0.37.0
-vine==5.1.0
-wcwidth==0.2.14
+<file path="tests/test_api_generate.py">
+from fastapi.testclient import TestClient
+from unittest.mock import MagicMock
+
+from app.main import app
+from app.core.config import settings
+
+client = TestClient(app)
+
+# Get a valid key from the settings
+VALID_API_KEY = list(settings.API_KEYS)[0]
+
+def test_enqueue_generate_success(monkeypatch):
+    """Test successful enqueue of a generation job."""
+    # Mock the celery task's delay method
+    mock_delay = MagicMock()
+    mock_delay.return_value = MagicMock(id="test-job-123")
+    monkeypatch.setattr("app.worker.generate_text_task.delay", mock_delay)
+
+    payload = {
+        "model": "qwen3:0.6b",
+        "prompt": "Why is the sky blue?",
+        "max_tokens": 100,
+    }
+
+    response = client.post(
+        "/generate",
+        headers={"x-api-key": VALID_API_KEY},
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"job_id": "test-job-123", "status": "queued"}
+
+    # Verify that the task was called correctly
+    mock_delay.assert_called_once_with(
+        payload["model"],
+        payload["prompt"],
+        payload["max_tokens"],
+        0.7,  # temperature defaults to 0.7 in the pydantic model
+    )
+
+def test_enqueue_generate_no_api_key():
+    """Test request without an API key."""
+    response = client.post("/generate", json={})
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing or invalid API key"}
+
+def test_enqueue_generate_invalid_api_key():
+    """Test request with an invalid API key."""
+    response = client.post(
+        "/generate",
+        headers={"x-api-key": "invalid-key"},
+        json={},
+    )
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing or invalid API key"}
+</file>
+
+<file path="tests/test_api_models.py">
+import pytest
+
+from fastapi.testclient import TestClient
+
+import httpx
+
+
+
+from app.main import app
+
+
+
+
+
+def test_list_models_success(monkeypatch):
+
+    """Test successful listing of models by monkeypatching the client method."""
+
+
+
+    async def mock_list_models(*args, **kwargs):
+
+        return ["qwen3:0.6b", "mistral:latest"]
+
+
+
+    monkeypatch.setattr("app.services.ollama_client.OllamaClient.list_models", mock_list_models)
+
+
+
+    with TestClient(app) as client:
+
+        response = client.get("/models")
+
+
+
+    assert response.status_code == 200
+
+    assert response.json() == {"models": ["qwen3:0.6b", "mistral:latest"]}
+
+
+
+
+
+def test_list_models_ollama_error(monkeypatch):
+
+    """Test an error case by having the monkeypatched method raise an exception."""
+
+
+
+    async def mock_list_models_error(*args, **kwargs):
+
+        raise httpx.RequestError("Mocked network error")
+
+
+
+    monkeypatch.setattr("app.services.ollama_client.OllamaClient.list_models", mock_list_models_error)
+
+
+
+    with TestClient(app) as client:
+
+        response = client.get("/models")
+
+
+
+    assert response.status_code == 500
+
+    assert "Mocked network error" in response.json()["detail"]
+</file>
+
+<file path="tests/test_main.py">
+from fastapi.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+
+def test_healthz():
+    """Test the health check endpoint."""
+    response = client.get("/healthz")
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+</file>
+
+<file path="Dockerfile">
+# Use an official Python runtime as a parent image
+FROM python:3.11-slim
+
+# Set environment variables
+# Prevents Python from writing pyc files to disc
+ENV PYTHONDONTWRITEBYTECODE 1
+# Ensures Python output is sent straight to the terminal without buffering
+ENV PYTHONUNBUFFERED 1
+# Set the python path to include the project root
+ENV PYTHONPATH=.
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Install dependencies
+# Copy the requirements file first to leverage Docker cache
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the application code into the container
+COPY ./app /app/app
+
+# The command to run the application will be specified in docker-compose.yml
 </file>
 
 <file path="app/api/routes_generate.py">
@@ -1431,90 +1520,6 @@ async def get_status(job_id: str):
         return {"status": "failed", "error": str(result.result)}
     else:
         return {"status": result.state.lower()}
-</file>
-
-<file path="app/core/celery_app.py">
-from celery import Celery
-import os
-
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-
-celery_app = Celery(
-    "prodify_ai",
-    broker=REDIS_URL,
-    backend=REDIS_URL,
-)
-
-celery_app.conf.update(
-    broker_url="redis://localhost:6379/0",
-    result_backend="redis://localhost:6379/0",
-    task_track_started=True,
-    task_serializer="json",
-    result_serializer="json",
-    accept_content=["json"],
-    timezone="UTC",
-    enable_utc=True,
-    broker_connection_retry_on_startup=True,
-)
-</file>
-
-<file path="app/services/ollama_client.py">
-import httpx
-import json
-import asyncio
-import logging
-
-logger = logging.getLogger(__name__)
-
-class OllamaClient:
-    def __init__(self, base_url: str = "http://127.0.0.1:11434"):
-        """Initialize a self-contained Ollama HTTP client."""
-        self.base_url = base_url
-        # immediately create an AsyncClient — no .connect() required
-        self.client = httpx.AsyncClient(timeout=120)
-
-    async def list_models(self):
-        """Fetch available Ollama models."""
-        try:
-            r = await self.client.get(f"{self.base_url}/api/tags")
-            r.raise_for_status()
-            data = r.json()
-            return [m["name"] for m in data.get("models", [])]
-        except Exception as e:
-            logger.error(f"Error fetching Ollama models: {e}")
-            return []
-
-    async def generate_once(self, model: str, prompt: str, options: dict = None):
-        """Stream inference output and combine into final text."""
-        options = options or {}
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "options": options,
-            "stream": True
-        }
-
-        full_text = ""
-        try:
-            async with self.client.stream("POST", f"{self.base_url}/api/generate", json=payload) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.strip():
-                        continue
-                    try:
-                        data = json.loads(line)
-                        if "response" in data and data["response"]:
-                            full_text += data["response"]
-                    except Exception:
-                        continue
-        except Exception as e:
-            logger.error(f"Error during Ollama generation: {e}")
-            raise
-        return {"model": model, "text": full_text.strip()}
-
-    async def close(self):
-        """Cleanly close the HTTP connection."""
-        await self.client.aclose()
 </file>
 
 <file path="app/main.py">
@@ -1619,6 +1624,387 @@ async def metrics():
     return Response(content=body, media_type=ctype)
 </file>
 
+<file path="frontend/.gitignore">
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+.env*
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+</file>
+
+<file path="frontend/nginx.conf">
+server {
+  listen 80;
+
+  # Root directory for static files
+  root /usr/share/nginx/html;
+  index index.html;
+
+  # Handle client-side routing for React
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+
+  # Proxy API requests to the backend service
+  location ~ ^/(models|generate|status) {
+    proxy_pass http://backend:8000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header x-api-key $http_x_api_key;
+  }
+
+  # Optional: Add headers to prevent caching in development
+  location ~* \.(?:html|js|css)$ {
+    add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
+    expires off;
+    etag off;
+  }
+}
+</file>
+
+<file path="frontend/vite.config.ts">
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import path from "path"
+import tailwindcss from "@tailwindcss/vite"
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  server: {
+    proxy: {
+      "/generate": "http://127.0.0.1:8000",
+      "/models": "http://127.0.0.1:8000",
+      "/status": "http://127.0.0.1:8000",
+    },
+  },
+  
+})
+</file>
+
+<file path=".env.example">
+# API keys for the backend, comma-separated
+API_KEYS=your-development-api-key
+</file>
+
+<file path=".gitignore">
+.venv
+__pycache__
+.env
+dump.rdb
+</file>
+
+<file path="README.md">
+# 🚀 Prodify AI Inference Gateway
+
+> Scalable async inference system using **FastAPI**, **Celery**, **Redis**, and **Ollama**, with a modern **React (Vite + Shadcn)** frontend.
+
+---
+
+## 🧠 System Overview
+
+```
+Frontend (React)
+   │  prompts / polls
+   ▼
+FastAPI Gateway (API + Auth)
+   │  queues task
+   ▼
+Redis (Broker + Backend)
+   │  distributes
+   ▼
+Celery Worker → Ollama (LLM)
+   │  results
+   ▼
+Frontend UI updates
+```
+
+---
+
+## ⚙️ Tech Stack
+
+| Layer            | Tech           | Role                         |
+| ---------------- | -------------- | ---------------------------- |
+| **Frontend**     | React + Shadcn | Async prompt + polling UI    |
+| **Gateway**      | FastAPI        | Auth, routing, metrics       |
+| **Queue**        | Celery         | Async job management         |
+| **Broker/Store** | Redis          | Queue + result storage       |
+| **Inference**    | Ollama         | Local models (Qwen, Mistral) |
+
+---
+
+## 📁 Folder Structure
+
+```
+app/
+ ┣ api/
+ ┃ ┣ routes_generate.py   # POST /generate (async job)
+ ┃ ┣ routes_status.py     # GET /status/{job_id}
+ ┃ ┗ routes_models.py     # GET /models
+ ┣ services/
+ ┃ ┗ ollama_client.py     # Ollama API wrapper
+ ┣ worker.py              # Celery task runner
+ ┗ main.py                # FastAPI entrypoint
+frontend/
+ ┗ src/App.tsx            # Async UI (model + prompt)
+```
+
+---
+
+## ⚡ Workflow
+
+1. Frontend calls `/generate` → returns job_id
+2. FastAPI enqueues Celery task → Redis
+3. Worker pulls task → calls Ollama → stores result
+4. Frontend polls `/status/{job_id}` → displays output
+
+---
+
+## 🧩 Example
+
+```bash
+curl -X POST http://127.0.0.1:8000/generate \
+ -H "x-api-key: dev-key-123" \
+ -d '{"model":"qwen3:0.6b","prompt":"Write a haiku about Bangalore."}'
+```
+
+```json
+{ "job_id": "123abc", "status": "queued" }
+```
+
+Later:
+
+```json
+{ "status": "completed", "result": { "text": "Bangalore hums bright..." } }
+```
+
+---
+
+## 🚀 Highlights
+
+- Async inference via **Celery + Redis**
+- Local models served with **Ollama**
+- Secure API-key auth
+- Modern frontend with **Vite + Shadcn**
+- Scalable, fault-tolerant design
+</file>
+
+<file path="app/services/ollama_client.py">
+import httpx
+import json
+import asyncio
+import logging
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+class OllamaClient:
+    def __init__(self, base_url: str | None = None):
+        """Initialize a self-contained Ollama HTTP client."""
+        self.base_url = base_url or settings.OLLAMA_HOST
+        # immediately create an AsyncClient — no .connect() required
+        self.client = httpx.AsyncClient(timeout=120)
+
+    async def list_models(self):
+        """Fetch available Ollama models."""
+        try:
+            r = await self.client.get(f"{self.base_url}/api/tags")
+            r.raise_for_status()
+            data = r.json()
+            return [m["name"] for m in data.get("models", [])]
+        except Exception as e:
+            logger.error(f"Error fetching Ollama models: {e}")
+            return []
+
+    async def generate_once(self, model: str, prompt: str, options: dict = None):
+        """Stream inference output and combine into final text."""
+        options = options or {}
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "options": options,
+            "stream": True
+        }
+
+        full_text = ""
+        try:
+            async with self.client.stream("POST", f"{self.base_url}/api/generate", json=payload) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                        if "response" in data and data["response"]:
+                            full_text += data["response"]
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.error(f"Error during Ollama generation: {e}")
+            raise
+        return {"model": model, "text": full_text.strip()}
+
+    async def close(self):
+        """Cleanly close the HTTP connection."""
+        await self.client.aclose()
+</file>
+
+<file path="frontend/eslint.config.js">
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
+import { defineConfig, globalIgnores } from 'eslint/config'
+
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      js.configs.recommended,
+      tseslint.configs.recommended,
+      reactHooks.configs['recommended-latest'],
+      reactRefresh.configs.vite,
+    ],
+    rules: {
+        'react-refresh/only-export-components': [
+            'warn',
+            { allowConstantExport: true },
+        ],
+    },
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+  },
+])
+</file>
+
+<file path="requirements.txt">
+amqp==5.3.1
+annotated-types==0.7.0
+anyio==4.11.0
+billiard==4.2.2
+celery==5.5.3
+certifi==2025.10.5
+charset-normalizer==3.4.4
+click==8.3.0
+click-didyoumean==0.3.1
+click-plugins==1.1.1.2
+click-repl==0.3.0
+fastapi==0.119.0
+filelock==3.20.0
+flower==2.0.1
+fsspec==2025.9.0
+h11==0.16.0
+hf-xet==1.1.10
+httpcore==1.0.9
+httpx==0.28.1
+huggingface-hub==0.35.3
+humanize==4.14.0
+idna==3.11
+iniconfig==2.1.0
+jinja2==3.1.6
+kombu==5.5.4
+markupsafe==3.0.3
+mpmath==1.3.0
+networkx==3.5
+numpy==2.3.3
+packaging==25.0
+pluggy==1.6.0
+prometheus-client==0.23.1
+prompt-toolkit==3.0.52
+pydantic==2.12.2
+pydantic-core==2.41.4
+pygments==2.19.2
+pytest==8.4.2
+pytest-asyncio==1.2.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.1.1
+pytz==2025.2
+pyyaml==6.0.3
+redis==5.2.1
+regex==2025.9.18
+requests==2.32.5
+respx==0.22.0
+safetensors==0.6.2
+setuptools==80.9.0
+six==1.17.0
+sniffio==1.3.1
+starlette==0.48.0
+sympy==1.14.0
+tokenizers==0.22.1
+torch==2.8.0
+tornado==6.5.2
+tqdm==4.67.1
+transformers==4.57.1
+typing-extensions==4.15.0
+typing-inspection==0.4.2
+tzdata==2025.2
+urllib3==2.5.0
+uvicorn==0.37.0
+vine==5.1.0
+wcwidth==0.2.14
+</file>
+
+<file path="app/core/celery_app.py">
+from celery import Celery
+import os
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+celery_app = Celery(
+    "prodify_ai",
+    broker=REDIS_URL,
+    backend=REDIS_URL,
+)
+
+celery_app.conf.update(
+    task_track_started=True,
+    task_serializer="json",
+    result_serializer="json",
+    accept_content=["json"],
+    timezone="UTC",
+    enable_utc=True,
+    broker_connection_retry_on_startup=True,
+    task_acks_late=True,
+    broker_transport_options={"visibility_timeout": 7200},
+    task_default_retry_delay=10,
+    task_annotations={
+        '*': {'max_retries': 3, 'time_limit': 300}
+    },
+)
+</file>
+
 <file path="app/worker.py">
 from app.core.celery_app import celery_app
 from app.services.ollama_client import OllamaClient
@@ -1631,6 +2017,8 @@ def generate_text_task(self, model: str, prompt: str, max_tokens: int = 200, tem
     """Celery worker task: independent Ollama connection."""
     async def _run():
         ollama = OllamaClient()
+        # self.update_state(state="STARTED", meta={"progress": 0})
+        logger.info(f"[{self.request.id}] Starting text generation at {time.time()}")
         result = await ollama.generate_once(
             model=model,
             prompt=prompt,
@@ -1804,36 +2192,236 @@ function App() {
 export default App
 </file>
 
-<file path="frontend/vite.config.ts">
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-import path from "path"
-import tailwindcss from "@tailwindcss/vite"
+<file path="docker-compose.yml">
+services:
+  # Redis service for Celery message broker and result backend
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
 
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "./src"),
-    },
-  },
-  server: {
-    proxy: {
-      "/generate": "http://127.0.0.1:8000",
-      "/models": "http://127.0.0.1:8000",
-      "/status": "http://127.0.0.1:8000",
-    },
-  },
-  
-})
+  # Ollama service for LLM inference
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+    environment:
+      - OLLAMA_LOAD_TIMEOUT=600
+
+  # Backend FastAPI server
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    cache:
+        - type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/prodify-cache-backend:latest
+        - type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/prodify-cache-backend:main,mode=max
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - API_KEYS=${API_KEYS}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_started
+      ollama:
+        condition: service_healthy
+
+  # Celery worker for background tasks
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    cache:
+        - type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/prodify-cache-frontend:latest
+        - type=registry,ref=ghcr.io/${GITHUB_REPOSITORY_OWNER}/prodify-cache-frontend:main,mode=max
+    command: celery -A app.worker.celery_app worker --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_started
+      ollama:
+        condition: service_healthy
+
+  # Frontend Nginx server
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  ollama_data:
 </file>
 
-<file path=".gitignore">
-.venv
-__pycache__
-.env
-dump.rdb
+<file path=".github/workflows/ci.yml">
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: PYTHONPATH=. pytest
+
+  test-frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm install
+
+      - name: Lint frontend
+        working-directory: ./frontend
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: [test-backend, test-frontend]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ⬇️ STEP 1: ADDED - Log in to GHCR to store/retrieve cache layers
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ⬇️ STEP 2: ADDED - Set up the advanced builder required for caching
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+
+      - name: Build and run Docker Compose
+        env:
+          API_KEYS: dev-key-123
+        run: docker compose up -d --build
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Wait for services to be healthy
+        run: |
+          echo "Waiting for backend..."
+          while [[ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/healthz)" != "200" ]]; do
+            sleep 2
+          done
+          echo "Waiting for frontend..."
+          while [[ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/)" != "200" ]]; do
+            sleep 2
+          done
+          echo "Services are up!"
+
+      - name: Run End-to-End Test
+        env:
+          API_KEYS: dev-key-123
+        run: |
+          # (Your test script remains the same)
+          echo "Starting end-to-end test for /generate endpoint..."
+
+          HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST -H "Content-Type: application/json" -H "x-api-key: $API_KEYS" -d '{"model":"qwen3:0.6b","prompt":"a haiku about CI/CD"}' http://localhost:8080/generate)
+          HTTP_STATUS=$(echo "$HTTP_RESPONSE" | tail -n1)
+          HTTP_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+
+          echo "Response Body: $HTTP_BODY"
+          echo "Response Status: $HTTP_STATUS"
+
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "/generate endpoint failed with status $HTTP_STATUS"
+            exit 1
+          fi
+
+          JOB_ID=$(echo $HTTP_BODY | jq -r '.job_id')
+
+          if [ -z "$JOB_ID" ] || [ "$JOB_ID" == "null" ]; then
+            echo "Failed to get a valid job_id from response!"
+            exit 1
+          fi
+          echo "Job submitted with ID: $JOB_ID"
+
+          echo "Polling for job completion..."
+          for i in {1..60}; do
+            STATUS_RESPONSE=$(curl -s http://localhost:8080/status/$JOB_ID)
+            JOB_STATUS=$(echo $STATUS_RESPONSE | jq -r '.status')
+            echo "Current job status: $JOB_STATUS"
+
+            if [ "$JOB_STATUS" == "completed" ]; then
+              echo "Job completed successfully!"
+              RESULT_TEXT=$(echo $STATUS_RESPONSE | jq -r '.result.text')
+              echo "Result: $RESULT_TEXT"
+              exit 0
+            elif [ "$JOB_STATUS" == "failed" ]; then
+              echo "Job failed!"
+              echo "Response: $STATUS_RESPONSE"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "Job did not complete in time!"
+          exit 1
+
+      - name: View logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down services
+        if: always()
+        run: docker compose down
 </file>
 
 </files>
