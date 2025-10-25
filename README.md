@@ -4,6 +4,18 @@
 
 This project demonstrates a modern, scalable, and fault-tolerant architecture for serving AI model inferences asynchronously. It's designed to handle concurrent requests efficiently, provide real-time status updates, and integrate seamlessly with various Large Language Models (LLMs) via Ollama.
 
+## Tech Stack
+
+| Layer                | Technology                         | Role                                                             | 
+| :------------------- | :--------------------------------- | :--------------------------------------------------------------- | 
+| **Frontend**         | React, Vite, Shadcn UI, TypeScript | Interactive UI for prompt submission and result display          | 
+| **Backend API**      | FastAPI, Python                    | High-performance API gateway, authentication, task enqueuing     | 
+| **Task Queue**       | Celery, Redis                      | Asynchronous task management, message brokering, result storage  | 
+| **LLM Inference**    | Ollama                             | Local LLM serving (supports various models like Qwen, Mistral)   | 
+| **Containerization** | Docker, Docker Compose             | Environment consistency, simplified deployment and orchestration | 
+| **Monitoring**       | Prometheus Client (Python)         | Capturing and exposing application metrics                       | 
+
+
 ## Key Features & Benefits
 
 - **Asynchronous Inference:** Leverages Celery and Redis for background task processing, ensuring a responsive user experience and efficient resource utilization.
@@ -49,16 +61,6 @@ The system is composed of several interconnected services, each playing a crucia
 - **Celery Worker:** A distributed task queue worker that consumes tasks from Redis. It orchestrates the actual LLM inference by interacting with the Ollama service.
 - **Ollama:** A powerful tool for running Large Language Models locally. The Celery worker sends prompts to Ollama, which then performs the inference using the selected LLM (e.g., Qwen, Mistral).
 
-## Tech Stack
-
-| Layer                | Technology                         | Role                                                             | 
-| :------------------- | :--------------------------------- | :--------------------------------------------------------------- | 
-| **Frontend**         | React, Vite, Shadcn UI, TypeScript | Interactive UI for prompt submission and result display          | 
-| **Backend API**      | FastAPI, Python                    | High-performance API gateway, authentication, task enqueuing     | 
-| **Task Queue**       | Celery, Redis                      | Asynchronous task management, message brokering, result storage  | 
-| **LLM Inference**    | Ollama                             | Local LLM serving (supports various models like Qwen, Mistral)   | 
-| **Containerization** | Docker, Docker Compose             | Environment consistency, simplified deployment and orchestration | 
-| **Monitoring**       | Prometheus Client (Python)         | Capturing and exposing application metrics                       | 
 
 ## Project Structure
 
