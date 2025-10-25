@@ -1,8 +1,4 @@
-# Prodify AI Inference Gateway
-
-## A Scalable and Robust Asynchronous AI Inference System
-
-This project demonstrates a modern, scalable, and fault-tolerant architecture for serving AI model inferences asynchronously. It's designed to handle concurrent requests efficiently, provide real-time status updates, and integrate seamlessly with various Large Language Models (LLMs) via Ollama.
+# Chat with your own deployed LLM: Qwen3-0.6b
 
 ## Tech Stack
 
